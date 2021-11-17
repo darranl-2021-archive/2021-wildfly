@@ -90,6 +90,7 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
+import org.wildfly.core.testrunner.ServerControl;
 
 /**
  * Testing https connection to Web Connector with configured two-way SSL.
@@ -107,7 +108,8 @@ import org.junit.runner.RunWith;
 @RunWith(Arquillian.class)
 @RunAsClient
 @Category(CommonCriteria.class)
-@Ignore("[WFLY-15177] Complete porting of HTTPSWebConnectorTestCase to Elytron.")
+@ServerControl(manual = true)
+//@Ignore("[WFLY-15177] Complete porting of HTTPSWebConnectorTestCase to Elytron.")
 public class HTTPSWebConnectorTestCase {
 
     private static final String STANDARD_SOCKETS = "standard-sockets";
@@ -157,7 +159,7 @@ public class HTTPSWebConnectorTestCase {
 
     @Deployment(name = APP_CONTEXT, testable = false, managed = false)
     public static WebArchive deployment() {
-        LOGGER.trace("Start deployment " + APP_CONTEXT);
+        LOGGER.error("Start deployment " + APP_CONTEXT);
         final WebArchive war = ShrinkWrap.create(WebArchive.class, APP_CONTEXT + ".war");
         war.addClasses(AddRoleLoginModule.class, SimpleServlet.class, SimpleSecuredServlet.class,
                 PrincipalPrintingServlet.class);
@@ -167,16 +169,16 @@ public class HTTPSWebConnectorTestCase {
     }
 
     @Test
-    @InSequence(-1)
+    @InSequence(1)
     public void startAndSetupContainer() throws Exception {
 
-        LOGGER.trace("*** starting server");
+        LOGGER.error("*** starting server");
         containerController.start(CONTAINER);
         ModelControllerClient client = TestSuiteEnvironment.getModelControllerClient();
         ManagementClient managementClient = new ManagementClient(client, TestSuiteEnvironment.getServerAddress(),
                 TestSuiteEnvironment.getServerPort(), "remote+http");
 
-        LOGGER.trace("*** will configure server now");
+        LOGGER.error("*** will configure server now");
         serverSetup(managementClient);
 
         deployer.deploy(APP_CONTEXT);
@@ -193,7 +195,7 @@ public class HTTPSWebConnectorTestCase {
      * @throws Exception
      */
     @Test
-    @InSequence(1)
+    @InSequence(5)
     public void testNonVerifyingConnector() throws Exception {
 
         Assume.assumeFalse(SystemUtils.IS_JAVA_1_6 && SystemUtils.JAVA_VENDOR.toUpperCase(Locale.ENGLISH).contains("IBM"));
@@ -241,7 +243,8 @@ public class HTTPSWebConnectorTestCase {
      * @throws Exception
      */
     @Test
-    @InSequence(1)
+    @InSequence(5)
+    @Ignore
     public void testWantVerifyConnector() throws Exception {
 
         Assume.assumeFalse(SystemUtils.IS_JAVA_1_6 && SystemUtils.JAVA_VENDOR.toUpperCase(Locale.ENGLISH).contains("IBM"));
@@ -285,7 +288,8 @@ public class HTTPSWebConnectorTestCase {
      * @throws Exception
      */
     @Test
-    @InSequence(1)
+    @InSequence(5)
+    @Ignore
     public void testVerifyingConnector() throws Exception {
         final HttpClient httpClient = getHttpClient(CLIENT_KEYSTORE_FILE);
         final HttpClient httpClientUntrusted = getHttpClient(UNTRUSTED_KEYSTORE_FILE);
@@ -342,16 +346,16 @@ public class HTTPSWebConnectorTestCase {
     }
 
     @Test
-    @InSequence(3)
+    @InSequence(10)
     public void stopContainer() throws Exception {
         deployer.undeploy(APP_CONTEXT);
         final ModelControllerClient client = TestSuiteEnvironment.getModelControllerClient();
         final ManagementClient managementClient = new ManagementClient(client, TestSuiteEnvironment.getServerAddress(),
                 TestSuiteEnvironment.getServerPort(), "remote+http");
-        LOGGER.trace("*** reseting test configuration");
+        LOGGER.error("*** reseting test configuration");
         serverTearDown(managementClient);
 
-        LOGGER.trace("*** stopping container");
+        LOGGER.error("*** stopping container");
         containerController.stop(CONTAINER);
     }
 
@@ -370,23 +374,28 @@ public class HTTPSWebConnectorTestCase {
         Utils.createKeyMaterial(WORK_DIR);
 
         // Uncomment if TRACE logging is necessary. Don't leave it on all the time; CI resources aren't free.
-        //TRACE_SECURITY.setup(managementClient, null);
+        TRACE_SECURITY.setup(managementClient, null);
 
-        SecurityDomainsSetup.INSTANCE.setup(managementClient, null);
+//        SecurityDomainsSetup.INSTANCE.setup(managementClient, null);
 
         final ModelControllerClient client = managementClient.getControllerClient();
+        addUndertowApplicationDomain(SECURITY_DOMAIN_CERT, SECURITY_DOMAIN_CERT, client);
 
         // add new SSLContext
         ModelNode addSSLContexts = createAddSSLContexts();
         Utils.applyUpdate(addSSLContexts, client);
 
+        addHttpsListener(SSL_CONTEXT_DEFAULT, HTTPS_NAME_VERIFY_NOT_REQUESTED, HTTPS_PORT_VERIFY_FALSE, client);
+        addHttpsListener(SSL_CONTEXT_WANT, HTTPS_NAME_VERIFY_REQUESTED, HTTPS_PORT_VERIFY_WANT, client);
+        addHttpsListener(SSL_CONTEXT_NEED, HTTPS_NAME_VERIFY_REQUIRED, HTTPS_PORT_VERIFY_TRUE, client);
+
         LOGGER.trace("*** restarting server");
         containerController.stop(CONTAINER);
         containerController.start(CONTAINER);
 
-        addHttpsConnector(SSL_CONTEXT_DEFAULT, HTTPS_NAME_VERIFY_NOT_REQUESTED, HTTPS_PORT_VERIFY_FALSE, client);
-        addHttpsConnector(SSL_CONTEXT_WANT, HTTPS_NAME_VERIFY_REQUESTED, HTTPS_PORT_VERIFY_WANT, client);
-        addHttpsConnector(SSL_CONTEXT_NEED, HTTPS_NAME_VERIFY_REQUIRED, HTTPS_PORT_VERIFY_TRUE, client);
+
+        //Create Elytron security domain with a role mapper
+        //Create undertow application-security-domains
     }
 
     private ModelNode createAddSSLContexts() throws Exception {
@@ -423,7 +432,9 @@ public class HTTPSWebConnectorTestCase {
         addOp.get("key-manager").set("TestKeyManager");
         addOp.get("trust-manager").set("TestTrustManager");
         final ModelNode protocols = new ModelNode();
-        protocols.add("TLSv1");
+//        protocols.add("TLSv1");
+        protocols.add("TLSv1.2");
+//        protocols.add("TLSv1.3");
         addOp.get("protocols").set(protocols);
         if (wantClientAuth) {
             addOp.get("want-client-auth").set(true);
@@ -464,7 +475,53 @@ public class HTTPSWebConnectorTestCase {
         operations.add(addOp);
     }
 
-    private void addHttpsConnector(String sslContextName, String httpsName, int httpsPort, ModelControllerClient client)
+    private void addUndertowApplicationDomain(String applicationDomain, String elytronDomain, ModelControllerClient client)
+            throws Exception {
+        ModelNode operation = createOpNode("subsystem=elytron/constant-role-mapper=servlet-role-mapper", ModelDescriptionConstants.ADD);
+        ModelNode roles = new ModelNode();
+        roles.add( SimpleSecuredServlet.ALLOWED_ROLE);
+        operation.get("roles").set(roles);
+        Utils.applyUpdate(operation, client);
+
+        operation = createOpNode("subsystem=elytron/security-domain=" + elytronDomain, ModelDescriptionConstants.ADD);
+        operation.get("default-realm").set("ApplicationRealm");
+        operation.get("permission-mapper").set("default-permission-mapper");
+        operation.get("role-mapper").set("servlet-role-mapper");
+        ModelNode realmsNode = operation.get("realms");
+
+        ModelNode applicationRealmNode = new ModelNode();
+        applicationRealmNode.get("realm").set("ApplicationRealm");
+        applicationRealmNode.get("role-decoder").set("groups-to-roles");
+//        applicationRealmNode.get("role-mapper").set("servlet-role-mapper");
+        realmsNode.add(applicationRealmNode);
+        ModelNode localRealmNode = new ModelNode();
+        localRealmNode.get("realm").set("local");
+//        localRealmNode.get("role-mapper").set("servlet-role-mapper");
+        realmsNode.add(localRealmNode);
+
+        Utils.applyUpdate(operation, client);
+
+        operation = createOpNode("subsystem=undertow/application-security-domain=" + applicationDomain,
+                ModelDescriptionConstants.ADD);
+        operation.get("security-domain").set(elytronDomain);
+
+        Utils.applyUpdate(operation, client);
+    }
+
+    private void removeUndertowApplicationDomain(String applicationDomain, String elytronDomain, ModelControllerClient client)
+            throws Exception {
+        ModelNode operation = createOpNode("subsystem=undertow/application-security-domain=" + applicationDomain,
+                ModelDescriptionConstants.REMOVE);
+        Utils.applyUpdate(operation, client);
+
+        operation = createOpNode("subsystem=elytron/security-domain=" + elytronDomain, ModelDescriptionConstants.REMOVE);
+        Utils.applyUpdate(operation, client);
+
+        operation = createOpNode("subsystem=elytron/constant-role-mapper=servlet-role-mapper", ModelDescriptionConstants.REMOVE);
+        Utils.applyUpdate(operation, client);
+    }
+
+    private void addHttpsListener(String sslContextName, String httpsName, int httpsPort, ModelControllerClient client)
             throws Exception {
         final ModelNode compositeOp = Util.createOperation(COMPOSITE, PathAddress.EMPTY_ADDRESS);
         final ModelNode steps = compositeOp.get(STEPS);
@@ -488,9 +545,10 @@ public class HTTPSWebConnectorTestCase {
     private void serverTearDown(ManagementClient managementClient) throws Exception {
 
         // delete test security domains
-        SecurityDomainsSetup.INSTANCE.tearDown(managementClient, null);
+//        SecurityDomainsSetup.INSTANCE.tearDown(managementClient, null);
 
         final ModelControllerClient client = managementClient.getControllerClient();
+        removeUndertowApplicationDomain(SECURITY_DOMAIN_CERT, SECURITY_DOMAIN_CERT, client);
 
         // delete https web connectors
         rmHttpsConnector(HTTPS_NAME_VERIFY_NOT_REQUESTED, client);
@@ -502,7 +560,7 @@ public class HTTPSWebConnectorTestCase {
 
         FileUtils.deleteDirectory(WORK_DIR);
         // Uncomment if TRACE logging is necessary. Don't leave it on all the time; CI resources aren't free.
-        //TRACE_SECURITY.tearDown(managementClient, null);
+        TRACE_SECURITY.tearDown(managementClient, null);
     }
 
     private void rmHttpsConnector(String httpsName, ModelControllerClient client) throws Exception {
