@@ -483,9 +483,15 @@ public class HTTPSWebConnectorTestCase {
         operation.get("roles").set(roles);
         Utils.applyUpdate(operation, client);
 
+        operation = createOpNode("subsystem=elytron/x500-attribute-principal-decoder=x500-decoder", ModelDescriptionConstants.ADD);
+        operation.get("attribute-name").set("CN");
+        operation.get("maximum-segments").set(1);
+        Utils.applyUpdate(operation, client);
+
         operation = createOpNode("subsystem=elytron/security-domain=" + elytronDomain, ModelDescriptionConstants.ADD);
         operation.get("default-realm").set("ApplicationRealm");
         operation.get("permission-mapper").set("default-permission-mapper");
+        operation.get("pre-realm-principal-transformer").set("x500-decoder");
         operation.get("role-mapper").set("servlet-role-mapper");
         ModelNode realmsNode = operation.get("realms");
 
@@ -518,6 +524,9 @@ public class HTTPSWebConnectorTestCase {
         Utils.applyUpdate(operation, client);
 
         operation = createOpNode("subsystem=elytron/constant-role-mapper=servlet-role-mapper", ModelDescriptionConstants.REMOVE);
+        Utils.applyUpdate(operation, client);
+
+        operation = createOpNode("subsystem=elytron/x500-attribute-principal-decoder=x500-decoder", ModelDescriptionConstants.REMOVE);
         Utils.applyUpdate(operation, client);
     }
 
